@@ -72,6 +72,11 @@ spec:
           env:
             - name: DATABASE_URL
               value: postgresql://postgres:postgres@postgres:5432/task_management
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: jwt-secret
+                  key: JWT_SECRET
 ---
 apiVersion: v1
 kind: Service
@@ -109,6 +114,11 @@ spec:
           env:
             - name: DATABASE_URL
               value: postgresql://postgres:postgres@postgres:5432/task_management
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: jwt-secret
+                  key: JWT_SECRET
 ---
 apiVersion: v1
 kind: Service

@@ -13,7 +13,11 @@ const USERS_SERVICE_URL = process.env.USERS_SERVICE_URL || 'http://localhost:300
 const TASKS_SERVICE_URL = process.env.TASKS_SERVICE_URL || 'http://localhost:3003';
 
 // Register CORS
-fastify.register(cors, { origin: true });
+fastify.register(cors, {
+    origin: true,
+    methods: ['GET', 'PUT', 'POST', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+});
 
 (async () => {
     // 1) register swagger
@@ -27,8 +31,8 @@ fastify.register(cors, { origin: true });
             },
             servers: [
                 {
-                    url: 'http://localhost:3000',
-                    description: 'Dev server'
+                    url: '/',
+                    description: 'Current server'
                 }
             ],
             tags: [
@@ -45,17 +49,18 @@ fastify.register(cors, { origin: true });
                         in: 'header'
                     }
                 }
-            },
-            externalDocs: {
-                url: 'https://swagger.io',
-                description: 'Find more info here'
             }
         }
     });
 
     // 2) register swagger-ui
     await fastify.register(swaggerUi, {
-        routePrefix: '/docs'
+        routePrefix: '/docs',
+        uiConfig: {
+            docExpansion: 'list',
+            deepLinking: false
+        },
+        staticCSP: true
     });
 
     const verifyToken = async (request, reply) => {
@@ -666,25 +671,44 @@ fastify.register(cors, { origin: true });
             summary: 'Get all tasks',
             description: 'Get all tasks for the authenticated user',
             security: [{ bearerAuth: [] }],
+            querystring: {
+                type: 'object',
+                required: ['userId'],
+                properties: {
+                    userId: { type: 'string' }
+                }
+            },
             response: {
                 200: {
                     description: 'List of tasks',
-                    type: 'array',
-                    items: {
-                        type: 'object',
-                        properties: {
-                            id: { type: 'string' },
-                            title: { type: 'string' },
-                            description: { type: 'string' },
-                            done: { type: 'boolean' },
-                            userId: { type: 'string' },
-                            createdAt: { type: 'string', format: 'date-time' },
-                            updatedAt: { type: 'string', format: 'date-time' }
+                    type: 'object',
+                    properties: {
+                        tasks: {
+                            type: 'array',
+                            items: {
+                                type: 'object',
+                                properties: {
+                                    id: { type: 'string' },
+                                    title: { type: 'string' },
+                                    description: { type: ['string', 'null'] },
+                                    done: { type: 'boolean' },
+                                    user_id: { type: 'string' },
+                                    created_at: { type: 'string', format: 'date-time' },
+                                    updated_at: { type: ['string', 'null'], format: 'date-time' }
+                                }
+                            }
                         }
                     }
                 },
                 401: {
                     description: 'Unauthorized',
+                    type: 'object',
+                    properties: {
+                        error: { type: 'string' }
+                    }
+                },
+                400: {
+                    description: 'Bad Request',
                     type: 'object',
                     properties: {
                         error: { type: 'string' }

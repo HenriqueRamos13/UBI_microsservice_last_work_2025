@@ -2,6 +2,7 @@ require('dotenv').config();
 const fastify = require('fastify')({ logger: true });
 const cors = require('@fastify/cors');
 const db = require('./db');
+const jwt = require('jsonwebtoken');
 
 
 fastify.register(cors, { origin: true });
@@ -15,12 +16,23 @@ const authenticate = async (request, reply) => {
         throw new Error('Authorization header missing');
     }
 
-
-
-
     if (!authHeader.startsWith('Bearer ')) {
         reply.code(401);
         throw new Error('Invalid token format');
+    }
+
+    try {
+        const token = authHeader.split(' ')[1];
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+        // Add user info to request
+        request.user = {
+            id: decoded.id,
+            email: decoded.email
+        };
+    } catch (error) {
+        reply.code(401);
+        throw new Error('Invalid or expired token');
     }
 };
 
@@ -185,6 +197,8 @@ fastify.delete('/tasks/delete/:id', { preHandler: authenticate }, async (request
 
 fastify.get('/tasks/get', { preHandler: authenticate }, async (request, reply) => {
     const { userId } = request.query;
+
+    console.log("AHAHAHHA", userId);
 
     if (!userId) {
         reply.code(400);

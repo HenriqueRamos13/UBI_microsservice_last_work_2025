@@ -1,7 +1,10 @@
 require('dotenv').config();
 const fastify = require('fastify')({ logger: true });
 const cors = require('@fastify/cors');
+const jwt = require('jsonwebtoken');
 const db = require('./db');
+
+const JWT_SECRET = process.env.JWT_SECRET || 'jwt_secret_key_that_should_be_big_and_random';
 
 fastify.register(cors, { origin: true });
 
@@ -16,6 +19,20 @@ const authenticate = async (request, reply) => {
     if (!authHeader.startsWith('Bearer ')) {
         reply.code(401);
         throw new Error('Invalid token format');
+    }
+
+    try {
+        const token = authHeader.split(' ')[1];
+        const decoded = jwt.verify(token, JWT_SECRET);
+
+        // Add user info to request
+        request.user = {
+            id: decoded.id,
+            email: decoded.email
+        };
+    } catch (error) {
+        reply.code(401);
+        throw new Error('Invalid or expired token');
     }
 };
 
