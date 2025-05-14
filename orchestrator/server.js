@@ -1,101 +1,722 @@
+// server.js
 require('dotenv').config();
-const fastify = require('fastify')({ logger: true });
+const fastify = require('fastify')({
+    logger: true
+});
 const cors = require('@fastify/cors');
 const axios = require('axios');
-
-// use the same swagger exports and transform from your Zod setup
-const { fastifySwagger } = require('@fastify/swagger');
-const { fastifySwaggerUi } = require('@fastify/swagger-ui');
-const { jsonSchemaTransform } = require('fastify-type-provider-zod');
-const { z } = require('zod');
+const swagger = require('@fastify/swagger');
+const swaggerUi = require('@fastify/swagger-ui');
 
 const AUTH_SERVICE_URL = process.env.AUTH_SERVICE_URL || 'http://localhost:3001';
 const USERS_SERVICE_URL = process.env.USERS_SERVICE_URL || 'http://localhost:3002';
 const TASKS_SERVICE_URL = process.env.TASKS_SERVICE_URL || 'http://localhost:3003';
 
-
+// Register CORS
 fastify.register(cors, { origin: true });
 
-// 2) SWAGGER (before any routes!)
-fastify.register(fastifySwagger, {
-    routePrefix: '/docs',               // <-- here
-    openapi: {
-        info: {
-            title: 'Task Management API',
-            description: 'Task Management System API Documentation',
-            version: '1.0.0',
-        },
-    },
-    transform: jsonSchemaTransform,
-    exposeRoute: true,
-});
-
-fastify.register(fastifySwaggerUi, {
-    routePrefix: '/docs',               // <-- same prefix
-    // swagger: { url: '/docs/json' }   // optional override if you want
-});
-
-// your existing routes…
-fastify.get('/health', {
-    schema: {
-        tags: ['health'],
-        summary: 'Health check endpoint',
-        response: {
-            200: z.object({
-                status: z.string()
-            })
+(async () => {
+    // 1) register swagger
+    await fastify.register(swagger, {
+        openapi: {
+            openapi: '3.0.0',
+            info: {
+                title: 'Task Management API',
+                description: 'Task Management System API Documentation',
+                version: '1.0.0'
+            },
+            servers: [
+                {
+                    url: 'http://localhost:3000',
+                    description: 'Dev server'
+                }
+            ],
+            tags: [
+                { name: 'auth', description: 'Authentication endpoints' },
+                { name: 'users', description: 'User management endpoints' },
+                { name: 'tasks', description: 'Task management endpoints' },
+                { name: 'health', description: 'Health check endpoint' }
+            ],
+            components: {
+                securitySchemes: {
+                    bearerAuth: {
+                        type: 'apiKey',
+                        name: 'Authorization',
+                        in: 'header'
+                    }
+                }
+            },
+            externalDocs: {
+                url: 'https://swagger.io',
+                description: 'Find more info here'
+            }
         }
-    }
-}, async () => ({ status: 'ok' }));
+    });
 
-fastify.post('/auth/register', {
-    schema: {
-        tags: ['auth'],
-        summary: 'Register a new user',
-        body: z.object({
-            email: z.string().email(),
-            password: z.string().min(6)
-        }),
-        response: {
-            200: z.object({
-                token: z.string(),
-                user: z.object({
-                    id: z.string(),
-                    email: z.string()
-                })
-            }),
-            400: z.object({
-                error: z.string()
-            })
+    // 2) register swagger-ui
+    await fastify.register(swaggerUi, {
+        routePrefix: '/docs'
+    });
+
+    const verifyToken = async (request, reply) => {
+        const token = request.headers.authorization?.split(' ')[1];
+        if (!token) {
+            reply.code(401);
+            throw new Error('No token provided');
+        }
+
+        try {
+            const response = await axios.post(`${AUTH_SERVICE_URL}/auth/token-verify`, { token });
+            request.user = response.data.user;
+        } catch (error) {
+            reply.code(401);
+            throw new Error('Invalid token');
+        }
+    };
+
+    // Health check endpoint
+    fastify.get('/health', {
+        schema: {
+            tags: ['health'],
+            summary: 'Health check endpoint',
+            description: 'Returns the health status of the API',
+            response: {
+                200: {
+                    description: 'Successful response',
+                    type: 'object',
+                    properties: {
+                        status: { type: 'string' }
+                    }
+                }
+            }
+        }
+    }, async () => {
+        return { status: 'ok' };
+    });
+
+    // Auth routes
+    fastify.post('/auth/register', {
+        schema: {
+            tags: ['auth'],
+            summary: 'Register a new user',
+            description: 'Register a new user in the system',
+            body: {
+                type: 'object',
+                required: ['email', 'password'],
+                properties: {
+                    email: { type: 'string', format: 'email' },
+                    password: { type: 'string', minLength: 6 }
+                }
+            },
+            response: {
+                200: {
+                    description: 'Successful registration',
+                    type: 'object',
+                    properties: {
+                        token: { type: 'string' },
+                        user: {
+                            type: 'object',
+                            properties: {
+                                id: { type: 'string' },
+                                email: { type: 'string' }
+                            }
+                        }
+                    }
+                },
+                400: {
+                    description: 'Bad Request',
+                    type: 'object',
+                    properties: {
+                        error: { type: 'string' }
+                    }
+                }
+            }
+        }
+    }, async (request, reply) => {
+        try {
+            const response = await axios.post(`${AUTH_SERVICE_URL}/auth/register`, request.body);
+            return response.data;
+        } catch (error) {
+            fastify.log.error(error);
+            reply.code(error.response?.status || 500);
+            return { error: error.response?.data?.error || 'Internal Server Error' };
+        }
+    });
+
+    fastify.post('/auth/login', {
+        schema: {
+            tags: ['auth'],
+            summary: 'Login user',
+            description: 'Authenticate a user and return a JWT token',
+            body: {
+                type: 'object',
+                required: ['email', 'password'],
+                properties: {
+                    email: { type: 'string', format: 'email' },
+                    password: { type: 'string' }
+                }
+            },
+            response: {
+                200: {
+                    description: 'Successful login',
+                    type: 'object',
+                    properties: {
+                        token: { type: 'string' },
+                        user: {
+                            type: 'object',
+                            properties: {
+                                id: { type: 'string' },
+                                email: { type: 'string' }
+                            }
+                        }
+                    }
+                },
+                401: {
+                    description: 'Unauthorized',
+                    type: 'object',
+                    properties: {
+                        error: { type: 'string' }
+                    }
+                }
+            }
+        }
+    }, async (request, reply) => {
+        try {
+            const response = await axios.post(`${AUTH_SERVICE_URL}/auth/login`, request.body);
+            return response.data;
+        } catch (error) {
+            fastify.log.error(error);
+            reply.code(error.response?.status || 500);
+            return { error: error.response?.data?.error || 'Internal Server Error' };
+        }
+    });
+
+    fastify.post('/auth/token-verify', {
+        schema: {
+            tags: ['auth'],
+            summary: 'Verify JWT token',
+            description: 'Verify if a JWT token is valid',
+            body: {
+                type: 'object',
+                required: ['token'],
+                properties: {
+                    token: { type: 'string' }
+                }
+            },
+            response: {
+                200: {
+                    description: 'Token verification result',
+                    type: 'object',
+                    properties: {
+                        valid: { type: 'boolean' },
+                        user: {
+                            type: 'object',
+                            properties: {
+                                id: { type: 'string' },
+                                email: { type: 'string' }
+                            }
+                        }
+                    }
+                },
+                401: {
+                    description: 'Invalid token',
+                    type: 'object',
+                    properties: {
+                        error: { type: 'string' }
+                    }
+                }
+            }
+        }
+    }, async (request, reply) => {
+        try {
+            const response = await axios.post(`${AUTH_SERVICE_URL}/auth/token-verify`, request.body);
+            return response.data;
+        } catch (error) {
+            fastify.log.error(error);
+            reply.code(error.response?.status || 500);
+            return { error: error.response?.data?.error || 'Internal Server Error' };
+        }
+    });
+
+    // User routes
+    fastify.post('/users/create', {
+        schema: {
+            tags: ['users'],
+            summary: 'Create a new user',
+            description: 'Create a new user in the system',
+            security: [
+                { bearerAuth: [] }
+            ],
+            body: {
+                type: 'object',
+                required: ['email', 'password'],
+                properties: {
+                    email: { type: 'string', format: 'email' },
+                    password: { type: 'string', minLength: 6 }
+                }
+            },
+            response: {
+                200: {
+                    description: 'User created successfully',
+                    type: 'object',
+                    properties: {
+                        id: { type: 'string' },
+                        email: { type: 'string' }
+                    }
+                },
+                400: {
+                    description: 'Bad Request',
+                    type: 'object',
+                    properties: {
+                        error: { type: 'string' }
+                    }
+                },
+                401: {
+                    description: 'Unauthorized',
+                    type: 'object',
+                    properties: {
+                        error: { type: 'string' }
+                    }
+                }
+            }
         },
-        security: [] // open endpoint
-    }
-}, async (request, reply) => {
-    try {
-        const { data } = await axios.post(
-            `${AUTH_SERVICE_URL}/auth/register`,
-            request.body
-        );
-        return data;
-    } catch (err) {
-        fastify.log.error(err);
-        reply.code(err.response?.status || 500);
-        return { error: err.response?.data?.error || 'Internal Server Error' };
-    }
+        preHandler: verifyToken
+    }, async (request, reply) => {
+        try {
+            const response = await axios.post(`${USERS_SERVICE_URL}/users/create`, request.body, {
+                headers: { authorization: request.headers.authorization }
+            });
+            return response.data;
+        } catch (error) {
+            fastify.log.error(error);
+            reply.code(error.response?.status || 500);
+            return { error: error.response?.data?.error || 'Internal Server Error' };
+        }
+    });
+
+    fastify.put('/users/update/:id', {
+        schema: {
+            tags: ['users'],
+            summary: 'Update a user',
+            description: 'Update an existing user',
+            security: [{ bearerAuth: [] }],
+            params: {
+                type: 'object',
+                required: ['id'],
+                properties: {
+                    id: { type: 'string' }
+                }
+            },
+            body: {
+                type: 'object',
+                properties: {
+                    email: { type: 'string', format: 'email' },
+                    password: { type: 'string', minLength: 6 }
+                }
+            },
+            response: {
+                200: {
+                    description: 'User updated successfully',
+                    type: 'object',
+                    properties: {
+                        id: { type: 'string' },
+                        email: { type: 'string' }
+                    }
+                },
+                400: {
+                    description: 'Bad Request',
+                    type: 'object',
+                    properties: {
+                        error: { type: 'string' }
+                    }
+                },
+                401: {
+                    description: 'Unauthorized',
+                    type: 'object',
+                    properties: {
+                        error: { type: 'string' }
+                    }
+                },
+                404: {
+                    description: 'User not found',
+                    type: 'object',
+                    properties: {
+                        error: { type: 'string' }
+                    }
+                }
+            }
+        },
+        preHandler: verifyToken
+    }, async (request, reply) => {
+        try {
+            const { id } = request.params;
+            const response = await axios.put(`${USERS_SERVICE_URL}/users/update/${id}`, request.body, {
+                headers: { authorization: request.headers.authorization }
+            });
+            return response.data;
+        } catch (error) {
+            fastify.log.error(error);
+            reply.code(error.response?.status || 500);
+            return { error: error.response?.data?.error || 'Internal Server Error' };
+        }
+    });
+
+    fastify.get('/users/get/:id', {
+        schema: {
+            tags: ['users'],
+            summary: 'Get user by ID',
+            description: 'Get a user by their ID',
+            security: [{ bearerAuth: [] }],
+            params: {
+                type: 'object',
+                required: ['id'],
+                properties: {
+                    id: { type: 'string' }
+                }
+            },
+            response: {
+                200: {
+                    description: 'User found',
+                    type: 'object',
+                    properties: {
+                        id: { type: 'string' },
+                        email: { type: 'string' }
+                    }
+                },
+                401: {
+                    description: 'Unauthorized',
+                    type: 'object',
+                    properties: {
+                        error: { type: 'string' }
+                    }
+                },
+                404: {
+                    description: 'User not found',
+                    type: 'object',
+                    properties: {
+                        error: { type: 'string' }
+                    }
+                }
+            }
+        },
+        preHandler: verifyToken
+    }, async (request, reply) => {
+        try {
+            const { id } = request.params;
+            const response = await axios.get(`${USERS_SERVICE_URL}/users/get/${id}`, {
+                headers: { authorization: request.headers.authorization }
+            });
+            return response.data;
+        } catch (error) {
+            fastify.log.error(error);
+            reply.code(error.response?.status || 500);
+            return { error: error.response?.data?.error || 'Internal Server Error' };
+        }
+    });
+
+    // Task routes
+    fastify.post('/tasks/create', {
+        schema: {
+            tags: ['tasks'],
+            summary: 'Create a new task',
+            description: 'Create a new task for the authenticated user',
+            security: [{ bearerAuth: [] }],
+            body: {
+                type: 'object',
+                required: ['title'],
+                properties: {
+                    title: { type: 'string' },
+                    description: { type: 'string' },
+                    done: { type: 'boolean', default: false }
+                }
+            },
+            response: {
+                200: {
+                    description: 'Task created successfully',
+                    type: 'object',
+                    properties: {
+                        id: { type: 'string' },
+                        title: { type: 'string' },
+                        description: { type: 'string' },
+                        done: { type: 'boolean' },
+                        userId: { type: 'string' },
+                        createdAt: { type: 'string', format: 'date-time' },
+                        updatedAt: { type: 'string', format: 'date-time' }
+                    }
+                },
+                400: {
+                    description: 'Bad Request',
+                    type: 'object',
+                    properties: {
+                        error: { type: 'string' }
+                    }
+                },
+                401: {
+                    description: 'Unauthorized',
+                    type: 'object',
+                    properties: {
+                        error: { type: 'string' }
+                    }
+                }
+            }
+        },
+        preHandler: verifyToken
+    }, async (request, reply) => {
+        try {
+            const response = await axios.post(`${TASKS_SERVICE_URL}/tasks/create`, {
+                ...request.body,
+                userId: request.user.id
+            }, {
+                headers: { authorization: request.headers.authorization }
+            });
+            return response.data;
+        } catch (error) {
+            fastify.log.error(error);
+            reply.code(error.response?.status || 500);
+            return { error: error.response?.data?.error || 'Internal Server Error' };
+        }
+    });
+
+    fastify.put('/tasks/update/:id', {
+        schema: {
+            tags: ['tasks'],
+            summary: 'Update a task',
+            description: 'Update an existing task',
+            security: [{ bearerAuth: [] }],
+            params: {
+                type: 'object',
+                required: ['id'],
+                properties: {
+                    id: { type: 'string' }
+                }
+            },
+            body: {
+                type: 'object',
+                properties: {
+                    title: { type: 'string' },
+                    description: { type: 'string' },
+                    done: { type: 'boolean' }
+                }
+            },
+            response: {
+                200: {
+                    description: 'Task updated successfully',
+                    type: 'object',
+                    properties: {
+                        id: { type: 'string' },
+                        title: { type: 'string' },
+                        description: { type: 'string' },
+                        done: { type: 'boolean' },
+                        userId: { type: 'string' },
+                        createdAt: { type: 'string', format: 'date-time' },
+                        updatedAt: { type: 'string', format: 'date-time' }
+                    }
+                },
+                400: {
+                    description: 'Bad Request',
+                    type: 'object',
+                    properties: {
+                        error: { type: 'string' }
+                    }
+                },
+                401: {
+                    description: 'Unauthorized',
+                    type: 'object',
+                    properties: {
+                        error: { type: 'string' }
+                    }
+                },
+                404: {
+                    description: 'Task not found',
+                    type: 'object',
+                    properties: {
+                        error: { type: 'string' }
+                    }
+                }
+            }
+        },
+        preHandler: verifyToken
+    }, async (request, reply) => {
+        try {
+            const { id } = request.params;
+            const response = await axios.put(`${TASKS_SERVICE_URL}/tasks/update/${id}`, request.body, {
+                headers: { authorization: request.headers.authorization }
+            });
+            return response.data;
+        } catch (error) {
+            fastify.log.error(error);
+            reply.code(error.response?.status || 500);
+            return { error: error.response?.data?.error || 'Internal Server Error' };
+        }
+    });
+
+    fastify.get('/tasks/get/:id', {
+        schema: {
+            tags: ['tasks'],
+            summary: 'Get task by ID',
+            description: 'Get a task by its ID',
+            security: [{ bearerAuth: [] }],
+            params: {
+                type: 'object',
+                required: ['id'],
+                properties: {
+                    id: { type: 'string' }
+                }
+            },
+            response: {
+                200: {
+                    description: 'Task found',
+                    type: 'object',
+                    properties: {
+                        id: { type: 'string' },
+                        title: { type: 'string' },
+                        description: { type: 'string' },
+                        done: { type: 'boolean' },
+                        userId: { type: 'string' },
+                        createdAt: { type: 'string', format: 'date-time' },
+                        updatedAt: { type: 'string', format: 'date-time' }
+                    }
+                },
+                401: {
+                    description: 'Unauthorized',
+                    type: 'object',
+                    properties: {
+                        error: { type: 'string' }
+                    }
+                },
+                404: {
+                    description: 'Task not found',
+                    type: 'object',
+                    properties: {
+                        error: { type: 'string' }
+                    }
+                }
+            }
+        },
+        preHandler: verifyToken
+    }, async (request, reply) => {
+        try {
+            const { id } = request.params;
+            const response = await axios.get(`${TASKS_SERVICE_URL}/tasks/get/${id}`, {
+                headers: { authorization: request.headers.authorization }
+            });
+            return response.data;
+        } catch (error) {
+            fastify.log.error(error);
+            reply.code(error.response?.status || 500);
+            return { error: error.response?.data?.error || 'Internal Server Error' };
+        }
+    });
+
+    fastify.delete('/tasks/delete/:id', {
+        schema: {
+            tags: ['tasks'],
+            summary: 'Delete task by ID',
+            description: 'Delete a task by its ID',
+            security: [{ bearerAuth: [] }],
+            params: {
+                type: 'object',
+                required: ['id'],
+                properties: {
+                    id: { type: 'string' }
+                }
+            },
+            response: {
+                200: {
+                    description: 'Task deleted successfully',
+                    type: 'object',
+                    properties: {
+                        success: { type: 'boolean' }
+                    }
+                },
+                401: {
+                    description: 'Unauthorized',
+                    type: 'object',
+                    properties: {
+                        error: { type: 'string' }
+                    }
+                },
+                404: {
+                    description: 'Task not found',
+                    type: 'object',
+                    properties: {
+                        error: { type: 'string' }
+                    }
+                }
+            }
+        },
+        preHandler: verifyToken
+    }, async (request, reply) => {
+        try {
+            const { id } = request.params;
+            const response = await axios.delete(`${TASKS_SERVICE_URL}/tasks/delete/${id}`, {
+                headers: { authorization: request.headers.authorization }
+            });
+            return response.data;
+        } catch (error) {
+            fastify.log.error(error);
+            reply.code(error.response?.status || 500);
+            return { error: error.response?.data?.error || 'Internal Server Error' };
+        }
+    });
+
+    fastify.get('/tasks/get', {
+        schema: {
+            tags: ['tasks'],
+            summary: 'Get all tasks',
+            description: 'Get all tasks for the authenticated user',
+            security: [{ bearerAuth: [] }],
+            response: {
+                200: {
+                    description: 'List of tasks',
+                    type: 'array',
+                    items: {
+                        type: 'object',
+                        properties: {
+                            id: { type: 'string' },
+                            title: { type: 'string' },
+                            description: { type: 'string' },
+                            done: { type: 'boolean' },
+                            userId: { type: 'string' },
+                            createdAt: { type: 'string', format: 'date-time' },
+                            updatedAt: { type: 'string', format: 'date-time' }
+                        }
+                    }
+                },
+                401: {
+                    description: 'Unauthorized',
+                    type: 'object',
+                    properties: {
+                        error: { type: 'string' }
+                    }
+                }
+            }
+        },
+        preHandler: verifyToken
+    }, async (request, reply) => {
+        try {
+            const response = await axios.get(`${TASKS_SERVICE_URL}/tasks/get?userId=${request.user.id}`, {
+                headers: { authorization: request.headers.authorization }
+            });
+            return response.data;
+        } catch (error) {
+            fastify.log.error(error);
+            reply.code(error.response?.status || 500);
+            return { error: error.response?.data?.error || 'Internal Server Error' };
+        }
+    });
+
+    // 4) wait until all plugins + routes are loaded
+    await fastify.ready();
+
+    // 5) inspect the full swagger spec
+    console.log(fastify.swagger());
+
+    // 6) start your server
+    await fastify.listen({ port: 3000, host: '0.0.0.0' });
+    console.log('Server is up at http://localhost:3000');
+    console.log('Docs UI:       http://localhost:3000/docs');
+})().catch(err => {
+    console.error(err);
+    process.exit(1);
 });
-
-// …and so on for your other auth/users/tasks routes
-
-const start = async () => {
-    try {
-        await fastify.listen({ port: 3000, host: '0.0.0.0' });
-        fastify.log.info('Server listening on http://localhost:3000');
-        fastify.log.info('Swagger UI:        http://localhost:3000/docs');
-        fastify.log.info('Raw JSON schema:   http://localhost:3000/documentation/json');
-    } catch (err) {
-        fastify.log.error(err);
-        process.exit(1);
-    }
-};
-
-start();
