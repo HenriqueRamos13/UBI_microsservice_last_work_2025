@@ -11,6 +11,16 @@ The system consists of four microservices:
 3. **Users**: Manages user data (port 3002)
 4. **Tasks**: Manages task data (port 3003)
 
+## Before all, install dependencies on each service
+
+```bash
+# Make script executable
+chmod +x install-all.sh
+
+# Run to install nodejs dependencies
+./install-all.sh
+```
+
 ## Running with Docker Compose
 
 For local development, use Docker Compose:
@@ -22,8 +32,6 @@ docker-compose up -d
 This will start all microservices and a PostgreSQL database.
 
 ## Deploying with Kubernetes (Minikube)
-
-For a production-like environment, use Kubernetes:
 
 ```bash
 # Make script executable
@@ -39,56 +47,9 @@ This will:
 3. Deploy all services to Kubernetes
 4. Provide a URL to access the orchestrator service
 
-## API Endpoints
+## Swagger
 
-### Authentication
-
-- `POST /auth/register` - Register a new user
-  ```json
-  { "email": "user@example.com", "password": "password123" }
-  ```
-
-- `POST /auth/login` - Login a user
-  ```json
-  { "email": "user@example.com", "password": "password123" }
-  ```
-
-- `POST /auth/token-verify` - Verify JWT token
-  ```json
-  { "token": "your-jwt-token" }
-  ```
-
-### Users
-
-- `POST /users/create` - Create a user (requires authentication)
-  ```json
-  { "email": "user@example.com" }
-  ```
-
-- `PUT /users/update/:id` - Update a user (requires authentication)
-  ```json
-  { "email": "newuser@example.com" }
-  ```
-
-- `GET /users/get/:id` - Get a user by ID (requires authentication)
-
-### Tasks
-
-- `POST /tasks/create` - Create a task (requires authentication)
-  ```json
-  { "title": "Task title", "description": "Task description", "userId": "user-uuid" }
-  ```
-
-- `PUT /tasks/update/:id` - Update a task (requires authentication)
-  ```json
-  { "title": "New title", "description": "New description", "done": true }
-  ```
-
-- `GET /tasks/get/:id` - Get a task by ID (requires authentication)
-
-- `DELETE /tasks/delete/:id` - Delete a task (requires authentication)
-
-- `GET /tasks/get?userId=:userId` - Get all tasks for a user (requires authentication)
+Access the URL provided by Kubernets with /docs at the end. <URL>/docs
 
 ## Environment Variables
 
@@ -101,6 +62,4 @@ Each service uses the following environment variables:
 
 **All Services:**
 - `DATABASE_URL`: PostgreSQL connection string
-
-**Auth Service:**
 - `JWT_SECRET`: Secret key for JWT token generation 

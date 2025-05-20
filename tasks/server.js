@@ -25,7 +25,6 @@ const authenticate = async (request, reply) => {
         const token = authHeader.split(' ')[1];
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-        // Add user info to request
         request.user = {
             id: decoded.id,
             email: decoded.email
@@ -43,20 +42,15 @@ fastify.get('/health', async () => {
 
 
 fastify.post('/tasks/create', { preHandler: authenticate }, async (request, reply) => {
-    const { title, description, userId } = request.body;
+    const { title, description } = request.body;
+    const userId = request.user.id;
 
     if (!title) {
         reply.code(400);
         return { error: 'Title is required' };
     }
 
-    if (!userId) {
-        reply.code(400);
-        return { error: 'User ID is required' };
-    }
-
     try {
-
         const result = await db.query(
             'INSERT INTO tasks (title, description, user_id) VALUES ($1, $2, $3) RETURNING *',
             [title, description || null, userId]
@@ -82,19 +76,18 @@ fastify.post('/tasks/create', { preHandler: authenticate }, async (request, repl
 fastify.put('/tasks/update/:id', { preHandler: authenticate }, async (request, reply) => {
     const { id } = request.params;
     const { title, description, done } = request.body;
+    const userId = request.user.id;
 
     try {
-
         const taskResult = await db.query(
-            'SELECT * FROM tasks WHERE id = $1',
-            [id]
+            'SELECT * FROM tasks WHERE id = $1 AND user_id = $2',
+            [id, userId]
         );
 
         if (taskResult.rows.length === 0) {
             reply.code(404);
-            return { error: 'Task not found' };
+            return { error: 'Task not found or unauthorized' };
         }
-
 
         const updates = [];
         const values = [];
@@ -119,14 +112,11 @@ fastify.put('/tasks/update/:id', { preHandler: authenticate }, async (request, r
         }
 
         updates.push(`updated_at = NOW()`);
-
-
         values.push(id);
 
-
         const result = await db.query(
-            `UPDATE tasks SET ${updates.join(', ')} WHERE id = $${paramCount} RETURNING *`,
-            values
+            `UPDATE tasks SET ${updates.join(', ')} WHERE id = $${paramCount} AND user_id = $${paramCount + 1} RETURNING *`,
+            [...values, userId]
         );
 
         const task = result.rows[0];
@@ -142,16 +132,17 @@ fastify.put('/tasks/update/:id', { preHandler: authenticate }, async (request, r
 
 fastify.get('/tasks/get/:id', { preHandler: authenticate }, async (request, reply) => {
     const { id } = request.params;
+    const userId = request.user.id;
 
     try {
         const result = await db.query(
-            'SELECT * FROM tasks WHERE id = $1',
-            [id]
+            'SELECT * FROM tasks WHERE id = $1 AND user_id = $2',
+            [id, userId]
         );
 
         if (result.rows.length === 0) {
             reply.code(404);
-            return { error: 'Task not found' };
+            return { error: 'Task not found or unauthorized' };
         }
 
         const task = result.rows[0];
@@ -167,19 +158,18 @@ fastify.get('/tasks/get/:id', { preHandler: authenticate }, async (request, repl
 
 fastify.delete('/tasks/delete/:id', { preHandler: authenticate }, async (request, reply) => {
     const { id } = request.params;
+    const userId = request.user.id;
 
     try {
-
         const taskResult = await db.query(
-            'SELECT * FROM tasks WHERE id = $1',
-            [id]
+            'SELECT * FROM tasks WHERE id = $1 AND user_id = $2',
+            [id, userId]
         );
 
         if (taskResult.rows.length === 0) {
             reply.code(404);
-            return { error: 'Task not found' };
+            return { error: 'Task not found or unauthorized' };
         }
-
 
         await db.query(
             'DELETE FROM tasks WHERE id = $1',
@@ -196,14 +186,7 @@ fastify.delete('/tasks/delete/:id', { preHandler: authenticate }, async (request
 
 
 fastify.get('/tasks/get', { preHandler: authenticate }, async (request, reply) => {
-    const { userId } = request.query;
-
-    console.log("AHAHAHHA", userId);
-
-    if (!userId) {
-        reply.code(400);
-        return { error: 'User ID is required' };
-    }
+    const userId = request.user.id;
 
     try {
         const result = await db.query(

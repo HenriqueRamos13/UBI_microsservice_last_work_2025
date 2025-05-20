@@ -1,4 +1,3 @@
-// server.js
 require('dotenv').config();
 const fastify = require('fastify')({
     logger: true
@@ -12,7 +11,6 @@ const AUTH_SERVICE_URL = process.env.AUTH_SERVICE_URL || 'http://localhost:3001'
 const USERS_SERVICE_URL = process.env.USERS_SERVICE_URL || 'http://localhost:3002';
 const TASKS_SERVICE_URL = process.env.TASKS_SERVICE_URL || 'http://localhost:3003';
 
-// Register CORS
 fastify.register(cors, {
     origin: true,
     methods: ['GET', 'PUT', 'POST', 'DELETE', 'OPTIONS'],
@@ -20,7 +18,6 @@ fastify.register(cors, {
 });
 
 (async () => {
-    // 1) register swagger
     await fastify.register(swagger, {
         openapi: {
             openapi: '3.0.0',
@@ -53,7 +50,7 @@ fastify.register(cors, {
         }
     });
 
-    // 2) register swagger-ui
+
     await fastify.register(swaggerUi, {
         routePrefix: '/docs',
         uiConfig: {
@@ -79,27 +76,56 @@ fastify.register(cors, {
         }
     };
 
-    // Health check endpoint
+
     fastify.get('/health', {
         schema: {
             tags: ['health'],
             summary: 'Health check endpoint',
-            description: 'Returns the health status of the API',
+            description: 'Returns the health status of all services',
             response: {
                 200: {
-                    description: 'Successful response',
+                    description: 'Health status of all services',
                     type: 'object',
                     properties: {
-                        status: { type: 'string' }
+                        status: { type: 'string' },
+                        services: {
+                            type: 'object',
+                            properties: {
+                                auth: { type: 'string' },
+                                users: { type: 'string' },
+                                tasks: { type: 'string' }
+                            }
+                        }
                     }
                 }
             }
         }
     }, async () => {
-        return { status: 'ok' };
+        const services = {
+            auth: AUTH_SERVICE_URL,
+            users: USERS_SERVICE_URL,
+            tasks: TASKS_SERVICE_URL
+        };
+
+        const healthStatus = {
+            status: 'ok',
+            services: {}
+        };
+
+        for (const [service, url] of Object.entries(services)) {
+            try {
+                const response = await axios.get(`${url}/health`);
+                healthStatus.services[service] = response.data.status;
+            } catch (error) {
+                healthStatus.services[service] = 'error';
+                healthStatus.status = 'failed';
+            }
+        }
+
+        return healthStatus;
     });
 
-    // Auth routes
+
     fastify.post('/auth/register', {
         schema: {
             tags: ['auth'],
@@ -243,75 +269,12 @@ fastify.register(cors, {
         }
     });
 
-    // User routes
-    fastify.post('/users/create', {
+    fastify.put('/users/update', {
         schema: {
             tags: ['users'],
-            summary: 'Create a new user',
-            description: 'Create a new user in the system',
-            security: [
-                { bearerAuth: [] }
-            ],
-            body: {
-                type: 'object',
-                required: ['email', 'password'],
-                properties: {
-                    email: { type: 'string', format: 'email' },
-                    password: { type: 'string', minLength: 6 }
-                }
-            },
-            response: {
-                200: {
-                    description: 'User created successfully',
-                    type: 'object',
-                    properties: {
-                        id: { type: 'string' },
-                        email: { type: 'string' }
-                    }
-                },
-                400: {
-                    description: 'Bad Request',
-                    type: 'object',
-                    properties: {
-                        error: { type: 'string' }
-                    }
-                },
-                401: {
-                    description: 'Unauthorized',
-                    type: 'object',
-                    properties: {
-                        error: { type: 'string' }
-                    }
-                }
-            }
-        },
-        preHandler: verifyToken
-    }, async (request, reply) => {
-        try {
-            const response = await axios.post(`${USERS_SERVICE_URL}/users/create`, request.body, {
-                headers: { authorization: request.headers.authorization }
-            });
-            return response.data;
-        } catch (error) {
-            fastify.log.error(error);
-            reply.code(error.response?.status || 500);
-            return { error: error.response?.data?.error || 'Internal Server Error' };
-        }
-    });
-
-    fastify.put('/users/update/:id', {
-        schema: {
-            tags: ['users'],
-            summary: 'Update a user',
-            description: 'Update an existing user',
+            summary: 'Update current user',
+            description: 'Update the authenticated user\'s information',
             security: [{ bearerAuth: [] }],
-            params: {
-                type: 'object',
-                required: ['id'],
-                properties: {
-                    id: { type: 'string' }
-                }
-            },
             body: {
                 type: 'object',
                 properties: {
@@ -354,8 +317,7 @@ fastify.register(cors, {
         preHandler: verifyToken
     }, async (request, reply) => {
         try {
-            const { id } = request.params;
-            const response = await axios.put(`${USERS_SERVICE_URL}/users/update/${id}`, request.body, {
+            const response = await axios.put(`${USERS_SERVICE_URL}/users/update`, request.body, {
                 headers: { authorization: request.headers.authorization }
             });
             return response.data;
@@ -419,7 +381,43 @@ fastify.register(cors, {
         }
     });
 
-    // Task routes
+    fastify.delete('/users/delete-account', {
+        schema: {
+            tags: ['users'],
+            summary: 'Delete user account',
+            description: 'Delete the authenticated user\'s account',
+            security: [{ bearerAuth: [] }],
+            response: {
+                200: {
+                    description: 'Account deleted successfully',
+                    type: 'object',
+                    properties: {
+                        message: { type: 'string' }
+                    }
+                },
+                401: {
+                    description: 'Unauthorized',
+                    type: 'object',
+                    properties: {
+                        error: { type: 'string' }
+                    }
+                }
+            }
+        },
+        preHandler: verifyToken
+    }, async (request, reply) => {
+        try {
+            const response = await axios.delete(`${USERS_SERVICE_URL}/users/delete-account`, {
+                headers: { authorization: request.headers.authorization }
+            });
+            return response.data;
+        } catch (error) {
+            fastify.log.error(error);
+            reply.code(error.response?.status || 500);
+            return { error: error.response?.data?.error || 'Internal Server Error' };
+        }
+    });
+
     fastify.post('/tasks/create', {
         schema: {
             tags: ['tasks'],
@@ -617,7 +615,7 @@ fastify.register(cors, {
         schema: {
             tags: ['tasks'],
             summary: 'Delete task by ID',
-            description: 'Delete a task by its ID',
+            description: 'Delete a task by its ID. Users can only delete their own tasks.',
             security: [{ bearerAuth: [] }],
             params: {
                 type: 'object',
@@ -642,7 +640,7 @@ fastify.register(cors, {
                     }
                 },
                 404: {
-                    description: 'Task not found',
+                    description: 'Task not found or unauthorized',
                     type: 'object',
                     properties: {
                         error: { type: 'string' }
@@ -671,13 +669,6 @@ fastify.register(cors, {
             summary: 'Get all tasks',
             description: 'Get all tasks for the authenticated user',
             security: [{ bearerAuth: [] }],
-            querystring: {
-                type: 'object',
-                required: ['userId'],
-                properties: {
-                    userId: { type: 'string' }
-                }
-            },
             response: {
                 200: {
                     description: 'List of tasks',
@@ -706,20 +697,13 @@ fastify.register(cors, {
                     properties: {
                         error: { type: 'string' }
                     }
-                },
-                400: {
-                    description: 'Bad Request',
-                    type: 'object',
-                    properties: {
-                        error: { type: 'string' }
-                    }
                 }
             }
         },
         preHandler: verifyToken
     }, async (request, reply) => {
         try {
-            const response = await axios.get(`${TASKS_SERVICE_URL}/tasks/get?userId=${request.user.id}`, {
+            const response = await axios.get(`${TASKS_SERVICE_URL}/tasks/get`, {
                 headers: { authorization: request.headers.authorization }
             });
             return response.data;
@@ -730,13 +714,12 @@ fastify.register(cors, {
         }
     });
 
-    // 4) wait until all plugins + routes are loaded
+
     await fastify.ready();
 
-    // 5) inspect the full swagger spec
     console.log(fastify.swagger());
 
-    // 6) start your server
+
     await fastify.listen({ port: 3000, host: '0.0.0.0' });
     console.log('Server is up at http://localhost:3000');
     console.log('Docs UI:       http://localhost:3000/docs');

@@ -25,7 +25,6 @@ const authenticate = async (request, reply) => {
         const token = authHeader.split(' ')[1];
         const decoded = jwt.verify(token, JWT_SECRET);
 
-        // Add user info to request
         request.user = {
             id: decoded.id,
             email: decoded.email
@@ -41,9 +40,9 @@ fastify.get('/health', async () => {
     return { status: 'ok' };
 });
 
-
-fastify.post('/users/create', { preHandler: authenticate }, async (request, reply) => {
+fastify.put('/users/update', { preHandler: authenticate }, async (request, reply) => {
     const { email } = request.body;
+    const userId = request.user.id;
 
     if (!email) {
         reply.code(400);
@@ -51,48 +50,9 @@ fastify.post('/users/create', { preHandler: authenticate }, async (request, repl
     }
 
     try {
-
-        const existingUser = await db.query(
-            'SELECT id FROM users WHERE email = $1',
-            [email]
-        );
-
-        if (existingUser.rows.length > 0) {
-            reply.code(409);
-            return { error: 'User already exists' };
-        }
-
-
-        const result = await db.query(
-            'INSERT INTO users (email, password) VALUES ($1, $2) RETURNING id, email, created_at',
-            [email, 'MANAGED_BY_AUTH_SERVICE']
-        );
-
-        const user = result.rows[0];
-
-        return { user };
-    } catch (error) {
-        fastify.log.error(error);
-        reply.code(500);
-        return { error: 'Internal Server Error' };
-    }
-});
-
-
-fastify.put('/users/update/:id', { preHandler: authenticate }, async (request, reply) => {
-    const { id } = request.params;
-    const { email } = request.body;
-
-    if (!email) {
-        reply.code(400);
-        return { error: 'Email is required' };
-    }
-
-    try {
-
         const result = await db.query(
             'UPDATE users SET email = $1, updated_at = NOW() WHERE id = $2 RETURNING id, email, created_at, updated_at',
-            [email, id]
+            [email, userId]
         );
 
         if (result.rows.length === 0) {
@@ -116,24 +76,12 @@ fastify.put('/users/update/:id', { preHandler: authenticate }, async (request, r
     }
 });
 
-
-fastify.get('/users/get/:id', { preHandler: authenticate }, async (request, reply) => {
-    const { id } = request.params;
+fastify.delete('/users/delete-account', { preHandler: authenticate }, async (request, reply) => {
+    const userId = request.user.id;
 
     try {
-        const result = await db.query(
-            'SELECT id, email, created_at, updated_at FROM users WHERE id = $1',
-            [id]
-        );
-
-        if (result.rows.length === 0) {
-            reply.code(404);
-            return { error: 'User not found' };
-        }
-
-        const user = result.rows[0];
-
-        return { user };
+        await db.query('DELETE FROM users WHERE id = $1', [userId]);
+        return { message: 'Account deleted successfully' };
     } catch (error) {
         fastify.log.error(error);
         reply.code(500);

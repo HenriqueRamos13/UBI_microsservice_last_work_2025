@@ -22,3 +22,5 @@ kubectl wait --for=condition=available deployment/orchestrator --timeout=120s
 
 echo "Services deployed. Access the orchestrator service at:"
 minikube service orchestrator --url 
+
+echo "Get the URL and open on <URL>/docs"
