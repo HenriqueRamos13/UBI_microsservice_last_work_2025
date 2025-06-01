@@ -1,0 +1,148 @@
+\documentclass{article}
+\usepackage{graphicx} % Required for inserting images
+\usepackage{listings}
+\usepackage{hyperref}
+\usepackage{tikz}
+\usepackage{float}
+
+\title{ARQUITETURA E DESENVOLVIMENTO DE MICROSSERVICOS}
+\author{Henrique Rodrigues - 45224}
+\date{Maio 2025}
+
+\begin{document}
+
+\maketitle
+
+\section{Introdução}
+Este documento descreve a arquitetura e implementação de um sistema de microsserviços desenvolvido utilizando tecnologias modernas como Fastify, PostgreSQL, Docker e Kubernetes. O sistema é composto por múltiplos serviços independentes que se comunicam entre si através de uma camada de orquestração, proporcionando escalabilidade e manutenibilidade.
+
+\section{Arquitetura do Sistema}
+\subsection{Visão Geral}
+O sistema segue uma arquitetura de microsserviços com os seguintes componentes principais:
+\begin{itemize}
+    \item \textbf{Cliente}: Interface web gerada automaticamente pelo Swagger UI
+    \item \textbf{Orquestrador}: Serviço central que roteia requisições e gerencia comunicação
+    \item \textbf{Serviços}: Auth, Users e Tasks
+    \item \textbf{Banco de Dados}: PostgreSQL
+\end{itemize}
+
+\subsection{Fluxo de Comunicação}
+O fluxo de comunicação segue o padrão:
+\begin{verbatim}
+Cliente -> Orquestrador -> Serviço Específico -> Banco de Dados
+\end{verbatim}
+
+\section{Serviços}
+\subsection{Orquestrador (Porta 3000)}
+O orquestrador atua como gateway da API, gerenciando:
+\begin{itemize}
+    \item Roteamento de requisições
+    \item Autenticação via JWT
+    \item Documentação Swagger UI
+    \item Health checks dos serviços
+\end{itemize}
+
+\subsection{Serviço de Autenticação (Porta 3001)}
+Responsável por:
+\begin{itemize}
+    \item Registro de usuários
+    \item Login
+    \item Verificação de tokens JWT
+\end{itemize}
+
+\subsection{Serviço de Usuários (Porta 3002)}
+Gerencia:
+\begin{itemize}
+    \item Atualização de dados do usuário
+    \item Deleção de conta
+    \item Consulta de informações do usuário
+\end{itemize}
+
+\subsection{Serviço de Tarefas (Porta 3003)}
+Oferece operações CRUD para tarefas:
+\begin{itemize}
+    \item Criação de tarefas
+    \item Atualização de tarefas
+    \item Listagem de tarefas
+    \item Deleção de tarefas
+\end{itemize}
+
+\section{Tecnologias Utilizadas}
+\subsection{Backend}
+\begin{itemize}
+    \item \textbf{Fastify}: Framework Node.js de alta performance
+    \item \textbf{PostgreSQL}: Banco de dados relacional
+    \item \textbf{JWT}: Autenticação stateless
+\end{itemize}
+
+\subsection{Documentação}
+\begin{itemize}
+    \item \textbf{Swagger UI}: Interface web automática
+    \item \textbf{OpenAPI}: Especificação da API
+\end{itemize}
+
+\subsection{Infraestrutura}
+\begin{itemize}
+    \item \textbf{Docker}: Containerização dos serviços
+    \item \textbf{Kubernetes}: Orquestração de containers
+\end{itemize}
+
+\section{Configuração Kubernetes}
+O sistema utiliza dois arquivos principais de configuração Kubernetes:
+
+\subsection{k8s-services.yaml}
+Define os deployments e services para:
+\begin{itemize}
+    \item Orquestrador
+    \item Serviço de Autenticação
+    \item Serviço de Usuários
+    \item Serviço de Tarefas
+\end{itemize}
+
+\subsection{k8s-postgres.yaml}
+Configura:
+\begin{itemize}
+    \item Deployment do PostgreSQL usando imagem alpine
+    \item ConfigMap com script de inicialização (schema.sql)
+    \item Secret para senha do banco
+    \item Service para acesso ao banco (ClusterIP)
+\end{itemize}
+
+\textbf{Nota}: Por simplicidade, o banco de dados não utiliza volumes persistentes, sendo recriado a cada reinicialização do pod. Em um ambiente de produção, seria necessário adicionar um PersistentVolume para garantir a persistência dos dados.
+
+\section{Scripts de Gerenciamento}
+\subsection{Setup (k8s-setup.sh)}
+Script responsável por:
+\begin{itemize}
+    \item Criar namespace Kubernetes
+    \item Aplicar configurações do PostgreSQL
+    \item Aplicar configurações dos serviços
+    \item Aguardar todos os pods estarem prontos
+\end{itemize}
+
+\subsection{Cleanup (cleanup.sh)}
+Script para limpeza do ambiente:
+\begin{itemize}
+    \item Remover todos os deployments
+    \item Remover todos os services
+    \item Remover persistent volumes
+    \item Deletar namespace
+\end{itemize}
+
+\section{Banco de Dados}
+O schema do PostgreSQL (schema.sql) define:
+\begin{itemize}
+    \item Tabela de usuários com campos para autenticação
+    \item Tabela de tarefas com relacionamento com usuários
+    \item Extensão UUID para identificadores únicos
+\end{itemize}
+
+\section{Instalação e Execução}
+O script install-all.sh automatiza:
+\begin{itemize}
+    \item Instalação de dependências npm em todos os serviços
+    \item Verificação de diretórios com package.json
+    \item Execução do npm install em paralelo
+\end{itemize}
+
+\end{document}
